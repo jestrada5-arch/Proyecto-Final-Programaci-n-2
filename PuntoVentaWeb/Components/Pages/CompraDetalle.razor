@@ -1,0 +1,492 @@
+@page "/compras/{IdCompra:int}"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Compra @(compra?.NoOrdenCompra.ToString() ?? "")</PageTitle>
+
+@if (!sesionLista || cargando)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else if (compra is null)
+{
+    <div class="alert alert-warning">
+        @(mensajeError == string.Empty ? "La compra no existe." : mensajeError)
+    </div>
+    <a href="/compras" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Volver a Compras</a>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3 pv-no-imprimir">
+        <div>
+            <a href="/compras" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Compras</a>
+            <h3 class="mb-0"><i class="bi bi-receipt text-primary"></i> Orden de compra No. @compra.NoOrdenCompra</h3>
+        </div>
+        <div class="d-flex gap-2">
+            @if (!modoEdicion)
+            {
+                <button class="btn btn-outline-secondary" @onclick="DescargarPdf" disabled="@descargando">
+                    <i class="bi bi-file-earmark-pdf"></i> @(descargando ? "Generando…" : "Descargar PDF")
+                </button>
+                @if (Sesion.PuedeAdministrar)
+                {
+                    <button class="btn btn-outline-primary" @onclick="EntrarModoEdicion">
+                        <i class="bi bi-pencil"></i> Editar
+                    </button>
+                    <button class="btn btn-outline-danger" @onclick="() => mostrarConfirmarEliminar = true">
+                        <i class="bi bi-trash"></i> Eliminar
+                    </button>
+                }
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible pv-no-imprimir">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(mensajeExito))
+    {
+        <div class="alert alert-success alert-dismissible pv-no-imprimir">
+            @mensajeExito
+            <button type="button" class="btn-close" @onclick="() => mensajeExito = string.Empty"></button>
+        </div>
+    }
+
+    <div class="card shadow-sm pv-boleta">
+        <div class="card-body">
+            @if (!modoEdicion)
+            {
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h6 class="text-muted">Proveedor</h6>
+                        <p class="mb-1 fw-semibold">@compra.Proveedor</p>
+                        @if (!string.IsNullOrEmpty(compra.ProveedorNit))
+                        {
+                            <p class="mb-1 small">NIT: @compra.ProveedorNit</p>
+                        }
+                        @if (!string.IsNullOrEmpty(compra.ProveedorDireccion))
+                        {
+                            <p class="mb-1 small">@compra.ProveedorDireccion</p>
+                        }
+                        @if (!string.IsNullOrEmpty(compra.ProveedorTelefono))
+                        {
+                            <p class="mb-0 small">Tel: @compra.ProveedorTelefono</p>
+                        }
+                    </div>
+                    <div class="col-md-6 text-md-end">
+                        <h6 class="text-muted">Detalle de la orden</h6>
+                        <p class="mb-1 small">Fecha de orden: <strong>@compra.FechaOrden.ToString("dd/MM/yyyy")</strong></p>
+                        <p class="mb-1 small">Registrada: <strong>@compra.FechaIngreso.ToString("dd/MM/yyyy HH:mm")</strong></p>
+                        <p class="mb-0 small">Recibido por: <strong>@(compra.UsuarioRegistro ?? "—")</strong></p>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Producto</th>
+                                <th class="text-center">Cantidad</th>
+                                <th class="text-end">Costo unitario</th>
+                                <th class="text-end">Subtotal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var linea in compra.Detalles)
+                            {
+                                <tr>
+                                    <td>@linea.Producto</td>
+                                    <td class="text-center">@linea.Cantidad</td>
+                                    <td class="text-end">Q @linea.PrecioCostoUnitario.ToString("0.00")</td>
+                                    <td class="text-end">Q @linea.Subtotal.ToString("0.00")</td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3" class="text-end fw-semibold">Total</td>
+                                <td class="text-end fw-bold fs-5">Q @compra.Total.ToString("0.00")</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Proveedor</label>
+                        <select class="form-select" @bind="idProveedorEdicion">
+                            <option value="0">Seleccione…</option>
+                            @foreach (var p in proveedores)
+                            {
+                                <option value="@p.IdProveedor">@p.Proveedor</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Fecha de orden</label>
+                        <input type="date" class="form-control" @bind="fechaOrdenEdicion" />
+                    </div>
+                </div>
+
+                <label class="form-label">Agregar producto</label>
+                <div class="position-relative mb-3">
+                    <div class="input-group">
+                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                        <input class="form-control" placeholder="Buscar por nombre o código…"
+                               @bind-value="textoBusqueda" @bind-value:event="oninput" @onkeyup="BuscarConRetraso" />
+                    </div>
+
+                    @if (resultados.Count > 0)
+                    {
+                        <div class="list-group position-absolute w-100 shadow-sm" style="z-index: 1056; max-height: 220px; overflow-y: auto;">
+                            @foreach (var p in resultados)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between"
+                                        @onclick="() => AgregarLinea(p)">
+                                    <span>@p.Producto <small class="text-muted">(@p.Marca · código @p.IdProducto)</small></span>
+                                    <span class="text-muted">Existencia: @p.Existencia</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @if (lineasEdicion.Count == 0)
+                {
+                    <p class="text-muted text-center py-3">Busque un producto arriba para agregarlo.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Producto</th>
+                                    <th style="width: 110px;">Cantidad</th>
+                                    <th style="width: 140px;">Costo unitario (Q)</th>
+                                    <th class="text-end" style="width: 120px;">Subtotal</th>
+                                    <th style="width: 50px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var linea in lineasEdicion)
+                                {
+                                    <tr>
+                                        <td>@linea.Producto</td>
+                                        <td>
+                                            <input type="number" min="1" class="form-control form-control-sm" @bind="linea.Cantidad" />
+                                        </td>
+                                        <td>
+                                            <input type="number" min="0.01" step="0.01" class="form-control form-control-sm" @bind="linea.PrecioCostoUnitario" />
+                                        </td>
+                                        <td class="text-end">Q @linea.Subtotal.ToString("0.00")</td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => lineasEdicion.Remove(linea)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="3" class="text-end fw-semibold">Total</td>
+                                    <td class="text-end fw-bold">Q @lineasEdicion.Sum(l => l.Subtotal).ToString("0.00")</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                }
+
+                <div class="d-flex justify-content-end gap-2 mt-3 pv-no-imprimir">
+                    <button class="btn btn-outline-secondary" @onclick="CancelarEdicion">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="GuardarEdicion" disabled="@(guardando || lineasEdicion.Count == 0)">
+                        @(guardando ? "Guardando…" : "Guardar cambios")
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (Sesion.PuedeAdministrar && mostrarConfirmarEliminar)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Eliminar orden de compra</h5>
+                    <button type="button" class="btn-close" @onclick="() => mostrarConfirmarEliminar = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        ¿Eliminar la orden No. <strong>@compra?.NoOrdenCompra</strong>? Esto le resta a cada producto
+                        la cantidad que esta compra había agregado (por ejemplo, por mercadería defectuoria devuelta
+                        al proveedor). Si alguno de esos productos ya se vendió y la existencia quedaría negativa,
+                        no se podrá eliminar.
+                    </p>
+                    <p class="text-danger mb-0"><strong>Esta acción no se puede deshacer.</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => mostrarConfirmarEliminar = false">Cancelar</button>
+                    <button class="btn btn-danger" @onclick="Eliminar" disabled="@guardando">Eliminar orden</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    @@media print {
+        .pv-no-imprimir { display: none !important; }
+        .pv-boleta { border: none !important; box-shadow: none !important; }
+    }
+</style>
+
+<script>
+    window.pvDescargarArchivo = (nombreArchivo, base64) => {
+        const enlace = document.createElement('a');
+        enlace.href = 'data:application/pdf;base64,' + base64;
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        document.body.removeChild(enlace);
+    };
+</script>
+
+@code {
+    [Parameter]
+    public int IdCompra { get; set; }
+
+    private CompraDto? compra;
+    private List<ProveedorDto> proveedores = new();
+    private List<ProductoDto> resultados = new();
+    private List<CompraDetalleEntradaDto> lineasEdicion = new();
+
+    private bool sesionLista;
+    private bool cargando = true;
+    private bool modoEdicion;
+    private bool guardando;
+    private bool descargando;
+    private bool mostrarConfirmarEliminar;
+
+    private int idProveedorEdicion;
+    private DateTime fechaOrdenEdicion = DateTime.Today;
+    private string textoBusqueda = string.Empty;
+
+    private string mensajeError = string.Empty;
+    private string mensajeExito = string.Empty;
+
+    private CancellationTokenSource? retraso;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await CargarAsync();
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<CompraDto>($"api/compras/{IdCompra}");
+        if (resultado.Ok)
+        {
+            compra = resultado.Datos;
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+
+    private async Task DescargarPdf()
+    {
+        descargando = true;
+        var resultado = await Api.DescargarAsync($"api/compras/{IdCompra}/pdf");
+        descargando = false;
+
+        if (resultado.Ok && resultado.Bytes is not null)
+        {
+            var nombreArchivo = $"orden-compra-{compra?.NoOrdenCompra}.pdf";
+            var base64 = Convert.ToBase64String(resultado.Bytes);
+            await JS.InvokeVoidAsync("pvDescargarArchivo", nombreArchivo, base64);
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+
+    private async Task EntrarModoEdicion()
+    {
+        if (compra is null) return;
+
+        if (proveedores.Count == 0)
+        {
+            var resultadoProveedores = await Api.ObtenerAsync<List<ProveedorDto>>("api/proveedores");
+            if (resultadoProveedores.Ok)
+            {
+                proveedores = resultadoProveedores.Datos ?? new();
+            }
+        }
+
+        idProveedorEdicion = compra.IdProveedor;
+        fechaOrdenEdicion = compra.FechaOrden;
+        lineasEdicion = compra.Detalles.Select(d => new CompraDetalleEntradaDto
+        {
+            IdProducto = d.IdProducto,
+            Producto = d.Producto,
+            Cantidad = d.Cantidad,
+            PrecioCostoUnitario = d.PrecioCostoUnitario
+        }).ToList();
+
+        modoEdicion = true;
+    }
+
+    private void CancelarEdicion()
+    {
+        modoEdicion = false;
+        textoBusqueda = string.Empty;
+        resultados.Clear();
+    }
+
+    private async Task BuscarConRetraso()
+    {
+        retraso?.Cancel();
+        retraso = new CancellationTokenSource();
+        var token = retraso.Token;
+
+        try
+        {
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
+
+            if (string.IsNullOrWhiteSpace(textoBusqueda))
+            {
+                resultados.Clear();
+                return;
+            }
+
+            var resultado = await Api.ObtenerAsync<List<ProductoDto>>($"api/productos?buscar={Uri.EscapeDataString(textoBusqueda)}");
+            if (!token.IsCancellationRequested && resultado.Ok)
+            {
+                resultados = (resultado.Datos ?? new()).Take(6).ToList();
+            }
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void AgregarLinea(ProductoDto producto)
+    {
+        var existente = lineasEdicion.FirstOrDefault(l => l.IdProducto == producto.IdProducto);
+        if (existente is not null)
+        {
+            existente.Cantidad++;
+        }
+        else
+        {
+            lineasEdicion.Add(new CompraDetalleEntradaDto
+            {
+                IdProducto = producto.IdProducto,
+                Producto = producto.Producto,
+                Marca = producto.Marca,
+                Cantidad = 1,
+                PrecioCostoUnitario = producto.PrecioCosto
+            });
+        }
+
+        textoBusqueda = string.Empty;
+        resultados.Clear();
+    }
+
+    private async Task GuardarEdicion()
+    {
+        mensajeError = string.Empty;
+
+        if (idProveedorEdicion <= 0)
+        {
+            mensajeError = "Seleccione un proveedor.";
+            return;
+        }
+
+        if (lineasEdicion.Count == 0)
+        {
+            mensajeError = "Agregue al menos un producto.";
+            return;
+        }
+
+        if (lineasEdicion.Any(l => l.Cantidad <= 0 || l.PrecioCostoUnitario <= 0))
+        {
+            mensajeError = "La cantidad y el costo de cada producto deben ser mayores a cero.";
+            return;
+        }
+
+        guardando = true;
+
+        var dto = new CompraCrearDto
+        {
+            IdProveedor = idProveedorEdicion,
+            FechaOrden = fechaOrdenEdicion,
+            Detalles = lineasEdicion
+        };
+
+        var resultado = await Api.EnviarAsync(HttpMethod.Put, $"api/compras/{IdCompra}", dto);
+        guardando = false;
+
+        if (resultado.Ok)
+        {
+            mensajeExito = "Compra actualizada correctamente.";
+            modoEdicion = false;
+            await CargarAsync();
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+
+    private async Task Eliminar()
+    {
+        guardando = true;
+        var resultado = await Api.EnviarAsync(HttpMethod.Delete, $"api/compras/{IdCompra}");
+        guardando = false;
+        mostrarConfirmarEliminar = false;
+
+        if (resultado.Ok)
+        {
+            Nav.NavigateTo("/compras");
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+}

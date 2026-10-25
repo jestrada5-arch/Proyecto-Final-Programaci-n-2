@@ -1,0 +1,402 @@
+@page "/compras"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+
+<PageTitle>Compras</PageTitle>
+
+@if (!sesionLista)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-0"><i class="bi bi-truck text-primary"></i> Compras</h3>
+            <small class="text-muted">Ingreso de mercadería: actualiza existencia, costo y precio de venta</small>
+        </div>
+        @if (Sesion.PuedeAdministrar || Sesion.EsBodeguero)
+        {
+            <button class="btn btn-primary" @onclick="AbrirNueva" disabled="@(proveedores.Count == 0)">
+                <i class="bi bi-plus-lg"></i> Nueva compra
+            </button>
+        }
+    </div>
+
+    @if (proveedores.Count == 0 && !cargando)
+    {
+        <div class="alert alert-warning">
+            Primero registre al menos un <a href="/proveedores">proveedor</a> para poder ingresar compras.
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(mensajeExito))
+    {
+        <div class="alert alert-success alert-dismissible">
+            @mensajeExito
+            <button type="button" class="btn-close" @onclick="() => mensajeExito = string.Empty"></button>
+        </div>
+    }
+
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>No. orden</th>
+                        <th>Proveedor</th>
+                        <th>Fecha</th>
+                        <th>Recibido por</th>
+                        <th class="text-center">Productos</th>
+                        <th class="text-end">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (cargando)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">Cargando…</td></tr>
+                    }
+                    else if (compras.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">Todavía no hay compras registradas.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var c in compras)
+                        {
+                            <tr role="button" @onclick="() => VerDetalle(c.IdCompra)" style="cursor: pointer;">
+                                <td class="fw-semibold">@c.NoOrdenCompra</td>
+                                <td>@c.Proveedor</td>
+                                <td>
+                                    @c.FechaOrden.ToString("dd/MM/yyyy")
+                                    <br /><small class="text-muted">Registrada @c.FechaIngreso.ToString("dd/MM/yyyy HH:mm")</small>
+                                </td>
+                                <td>@(c.UsuarioRegistro ?? "—")</td>
+                                <td class="text-center">@c.CantidadLineas</td>
+                                <td class="text-end fw-semibold">Q @c.Total.ToString("0.00")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (mostrarModal)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Nueva compra</h5>
+                    <button type="button" class="btn-close" @onclick="CerrarModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(errorModal))
+                    {
+                        <div class="alert alert-danger">@errorModal</div>
+                    }
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Proveedor</label>
+                            <select class="form-select" @bind="idProveedorSeleccionado">
+                                <option value="0">Seleccione…</option>
+                                @foreach (var p in proveedores)
+                                {
+                                    <option value="@p.IdProveedor">@p.Proveedor</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Fecha de orden</label>
+                            <input type="date" class="form-control" @bind="fechaOrden" />
+                        </div>
+                    </div>
+
+                    <label class="form-label">Agregar producto</label>
+                    <div class="position-relative mb-3">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                            <input class="form-control" placeholder="Buscar por nombre o código…"
+                                   @bind-value="textoBusqueda" @bind-value:event="oninput" @onkeyup="BuscarConRetraso" />
+                        </div>
+
+                        @if (resultados.Count > 0)
+                        {
+                            <div class="list-group position-absolute w-100 shadow-sm" style="z-index: 1056; max-height: 220px; overflow-y: auto;">
+                                @foreach (var p in resultados)
+                                {
+                                    <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between"
+                                            @onclick="() => AgregarLinea(p)">
+                                        <span>@p.Producto <small class="text-muted">(@p.Marca · código @p.IdProducto)</small></span>
+                                        <span class="text-muted">Existencia: @p.Existencia</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (lineas.Count == 0)
+                    {
+                        <p class="text-muted text-center py-3">Busque un producto arriba para agregarlo a la compra.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th style="width: 110px;">Cantidad</th>
+                                        <th style="width: 140px;">Costo unitario (Q)</th>
+                                        <th class="text-end" style="width: 120px;">Subtotal</th>
+                                        <th style="width: 50px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var linea in lineas)
+                                    {
+                                        <tr>
+                                            <td>
+                                                @linea.Producto
+                                                @if (!string.IsNullOrEmpty(linea.Marca))
+                                                {
+                                                    <br /><small class="text-muted">@linea.Marca</small>
+                                                }
+                                            </td>
+                                            <td>
+                                                <input type="number" min="1" class="form-control form-control-sm" @bind="linea.Cantidad" />
+                                            </td>
+                                            <td>
+                                                <input type="number" min="0.01" step="0.01" class="form-control form-control-sm" @bind="linea.PrecioCostoUnitario" />
+                                            </td>
+                                            <td class="text-end">Q @linea.Subtotal.ToString("0.00")</td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => QuitarLinea(linea)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="3" class="text-end fw-semibold">Total</td>
+                                        <td class="text-end fw-bold">Q @Total.ToString("0.00")</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CerrarModal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" @onclick="Guardar" disabled="@(guardando || lineas.Count == 0)">
+                        @(guardando ? "Guardando…" : "Registrar compra")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CompraListaDto> compras = new();
+    private List<ProveedorDto> proveedores = new();
+    private List<ProductoDto> resultados = new();
+    private List<CompraDetalleEntradaDto> lineas = new();
+
+    private bool mostrarModal;
+    private bool cargando = true;
+    private bool guardando;
+    private bool sesionLista;
+
+    private int idProveedorSeleccionado;
+    private DateTime fechaOrden = DateTime.Today;
+    private string textoBusqueda = string.Empty;
+
+    private string mensajeError = string.Empty;
+    private string mensajeExito = string.Empty;
+    private string errorModal = string.Empty;
+
+    private CancellationTokenSource? retraso;
+
+    private decimal Total => lineas.Sum(l => l.Subtotal);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        var resultadoProveedores = await Api.ObtenerAsync<List<ProveedorDto>>("api/proveedores");
+        if (resultadoProveedores.Ok)
+        {
+            proveedores = resultadoProveedores.Datos ?? new();
+        }
+
+        await CargarComprasAsync();
+    }
+
+    private async Task CargarComprasAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<List<CompraListaDto>>("api/compras");
+        if (resultado.Ok)
+        {
+            compras = resultado.Datos ?? new();
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+
+    private void AbrirNueva()
+    {
+        idProveedorSeleccionado = 0;
+        fechaOrden = DateTime.Today;
+        textoBusqueda = string.Empty;
+        resultados.Clear();
+        lineas.Clear();
+        errorModal = string.Empty;
+        mostrarModal = true;
+    }
+
+    private void CerrarModal()
+    {
+        mostrarModal = false;
+    }
+
+    private void VerDetalle(int idCompra)
+    {
+        Nav.NavigateTo($"/compras/{idCompra}");
+    }
+
+    private async Task BuscarConRetraso()
+    {
+        retraso?.Cancel();
+        retraso = new CancellationTokenSource();
+        var token = retraso.Token;
+
+        try
+        {
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
+
+            if (string.IsNullOrWhiteSpace(textoBusqueda))
+            {
+                resultados.Clear();
+                return;
+            }
+
+            var resultado = await Api.ObtenerAsync<List<ProductoDto>>($"api/productos?buscar={Uri.EscapeDataString(textoBusqueda)}");
+            if (!token.IsCancellationRequested && resultado.Ok)
+            {
+                resultados = (resultado.Datos ?? new()).Take(6).ToList();
+            }
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void AgregarLinea(ProductoDto producto)
+    {
+        var existente = lineas.FirstOrDefault(l => l.IdProducto == producto.IdProducto);
+        if (existente is not null)
+        {
+            existente.Cantidad++;
+        }
+        else
+        {
+            lineas.Add(new CompraDetalleEntradaDto
+            {
+                IdProducto = producto.IdProducto,
+                Producto = producto.Producto,
+                Marca = producto.Marca,
+                Cantidad = 1,
+                PrecioCostoUnitario = producto.PrecioCosto
+            });
+        }
+
+        textoBusqueda = string.Empty;
+        resultados.Clear();
+    }
+
+    private void QuitarLinea(CompraDetalleEntradaDto linea)
+    {
+        lineas.Remove(linea);
+    }
+
+    private async Task Guardar()
+    {
+        errorModal = string.Empty;
+
+        if (idProveedorSeleccionado <= 0)
+        {
+            errorModal = "Seleccione un proveedor.";
+            return;
+        }
+
+        if (lineas.Count == 0)
+        {
+            errorModal = "Agregue al menos un producto.";
+            return;
+        }
+
+        if (lineas.Any(l => l.Cantidad <= 0 || l.PrecioCostoUnitario <= 0))
+        {
+            errorModal = "La cantidad y el costo de cada producto deben ser mayores a cero.";
+            return;
+        }
+
+        guardando = true;
+
+        var dto = new CompraCrearDto
+        {
+            IdProveedor = idProveedorSeleccionado,
+            FechaOrden = fechaOrden,
+            Detalles = lineas
+        };
+
+        var resultado = await Api.EnviarAsync(HttpMethod.Post, "api/compras", dto);
+        guardando = false;
+
+        if (resultado.Ok)
+        {
+            mensajeExito = "Compra registrada correctamente. La existencia y el precio de los productos ya se actualizaron.";
+            mostrarModal = false;
+            await CargarComprasAsync();
+        }
+        else
+        {
+            errorModal = resultado.Mensaje;
+        }
+    }
+}

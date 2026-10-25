@@ -1,0 +1,23 @@
+@page "/"
+@inject SesionService Sesion
+
+<PageTitle>Inicio</PageTitle>
+
+<section class="pv-welcome">
+    <div class="pv-welcome-copy">
+        <span class="pv-eyebrow"><i class="bi bi-grid-1x2 me-2"></i>ESPACIO DE TRABAJO</span>
+        <h1>Bienvenido, @Sesion.Usuario</h1>
+        <p>Administra las operaciones de tu punto de venta desde un solo lugar.</p>
+    </div>
+    <div class="pv-welcome-mark" aria-hidden="true">
+        <i class="bi bi-shop-window"></i>
+    </div>
+</section>
+
+<section class="pv-home-card">
+    <div class="pv-home-card-icon"><i class="bi bi-arrow-left-circle"></i></div>
+    <div>
+        <h2>Comienza desde el menú</h2>
+        <p class="mb-0">Selecciona una sección en la navegación para consultar y administrar la información de tu negocio.</p>
+    </div>
+</section>

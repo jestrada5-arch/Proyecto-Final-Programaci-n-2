@@ -1,0 +1,229 @@
+@page "/ventas/{IdVenta:int}"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Venta @(venta is not null ? $"{venta.Serie}-{venta.NoFactura}" : "")</PageTitle>
+
+@if (!sesionLista || cargando)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else if (venta is null)
+{
+    <div class="alert alert-warning">
+        @(mensajeError == string.Empty ? "La venta no existe." : mensajeError)
+    </div>
+    <a href="/ventas" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Volver a Ventas</a>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3 pv-no-imprimir">
+        <div>
+            <a href="/ventas" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Ventas</a>
+            <h3 class="mb-0"><i class="bi bi-receipt text-primary"></i> Factura @venta.Serie-@venta.NoFactura</h3>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" @onclick="DescargarPdf" disabled="@descargando">
+                <i class="bi bi-file-earmark-pdf"></i> @(descargando ? "Generando…" : "Descargar factura")
+            </button>
+            @if (Sesion.PuedeAdministrar)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => mostrarConfirmarEliminar = true">
+                    <i class="bi bi-arrow-counterclockwise"></i> Anular venta
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible pv-no-imprimir">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+
+    <div class="card shadow-sm pv-boleta">
+        <div class="card-body">
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <h6 class="text-muted">Cliente</h6>
+                    <p class="mb-1 fw-semibold">@venta.Cliente</p>
+                    @if (!string.IsNullOrEmpty(venta.ClienteNit))
+                    {
+                        <p class="mb-0 small">NIT: @venta.ClienteNit</p>
+                    }
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <h6 class="text-muted">Detalle de la factura</h6>
+                    <p class="mb-1 small">Fecha: <strong>@venta.FechaFactura.ToString("dd/MM/yyyy")</strong></p>
+                    <p class="mb-1 small">Registrada: <strong>@venta.FechaIngreso.ToString("dd/MM/yyyy HH:mm")</strong></p>
+                    <p class="mb-0 small">Atendió: <strong>@venta.Empleado</strong></p>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Producto</th>
+                            <th class="text-center">Cantidad</th>
+                            <th class="text-end">Precio</th>
+                            <th class="text-end">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var linea in venta.Detalles)
+                        {
+                            <tr>
+                                <td>@linea.Producto</td>
+                                <td class="text-center">@linea.Cantidad</td>
+                                <td class="text-end">Q @linea.PrecioUnitario.ToString("0.00")</td>
+                                <td class="text-end">Q @linea.Subtotal.ToString("0.00")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3" class="text-end fw-semibold">Total</td>
+                            <td class="text-end fw-bold fs-5">Q @venta.Total.ToString("0.00")</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Sesion.PuedeAdministrar && mostrarConfirmarEliminar)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Anular venta</h5>
+                    <button type="button" class="btn-close" @onclick="() => mostrarConfirmarEliminar = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        ¿Anular la factura <strong>@venta?.Serie-@venta?.NoFactura</strong>? Esto repone en el
+                        inventario la cantidad de cada producto que se vendió en esta factura (por ejemplo, por
+                        una devolución del cliente).
+                    </p>
+                    <p class="text-danger mb-0"><strong>Esta acción no se puede deshacer.</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => mostrarConfirmarEliminar = false">Cancelar</button>
+                    <button class="btn btn-danger" @onclick="Eliminar" disabled="@guardando">Anular venta</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    @@media print {
+        .pv-no-imprimir { display: none !important; }
+        .pv-boleta { border: none !important; box-shadow: none !important; }
+    }
+</style>
+
+<script>
+    window.pvDescargarArchivo = (nombreArchivo, base64) => {
+        const enlace = document.createElement('a');
+        enlace.href = 'data:application/pdf;base64,' + base64;
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        document.body.removeChild(enlace);
+    };
+</script>
+
+@code {
+    [Parameter]
+    public int IdVenta { get; set; }
+
+    private VentaDto? venta;
+    private bool sesionLista;
+    private bool cargando = true;
+    private bool guardando;
+    private bool descargando;
+    private bool mostrarConfirmarEliminar;
+    private string mensajeError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await CargarAsync();
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<VentaDto>($"api/ventas/{IdVenta}");
+        if (resultado.Ok)
+        {
+            venta = resultado.Datos;
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+
+    private async Task DescargarPdf()
+    {
+        descargando = true;
+        var resultado = await Api.DescargarAsync($"api/ventas/{IdVenta}/pdf");
+        descargando = false;
+
+        if (resultado.Ok && resultado.Bytes is not null)
+        {
+            var nombreArchivo = $"factura-{venta?.Serie}-{venta?.NoFactura}.pdf";
+            var base64 = Convert.ToBase64String(resultado.Bytes);
+            await JS.InvokeVoidAsync("pvDescargarArchivo", nombreArchivo, base64);
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+
+    private async Task Eliminar()
+    {
+        guardando = true;
+        var resultado = await Api.EnviarAsync(HttpMethod.Delete, $"api/ventas/{IdVenta}");
+        guardando = false;
+        mostrarConfirmarEliminar = false;
+
+        if (resultado.Ok)
+        {
+            Nav.NavigateTo("/ventas");
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+}

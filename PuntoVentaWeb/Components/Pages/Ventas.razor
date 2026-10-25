@@ -1,0 +1,126 @@
+@page "/ventas"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+
+<PageTitle>Ventas</PageTitle>
+
+@if (!sesionLista)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-0"><i class="bi bi-cart-check text-primary"></i> Ventas</h3>
+            <small class="text-muted">Historial de facturas emitidas</small>
+        </div>
+        <a class="btn btn-primary" href="/ventas/nueva">
+            <i class="bi bi-plus-lg"></i> Nueva venta
+        </a>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Factura</th>
+                        <th>Cliente</th>
+                        <th>Atendió</th>
+                        <th>Fecha</th>
+                        <th class="text-center">Productos</th>
+                        <th class="text-end">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (cargando)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">Cargando…</td></tr>
+                    }
+                    else if (ventas.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">Todavía no hay ventas registradas.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var v in ventas)
+                        {
+                            <tr role="button" @onclick="() => VerDetalle(v.IdVenta)" style="cursor: pointer;">
+                                <td class="fw-semibold">@v.Serie-@v.NoFactura</td>
+                                <td>@v.Cliente</td>
+                                <td>@v.Empleado</td>
+                                <td>
+                                    @v.FechaFactura.ToString("dd/MM/yyyy")
+                                    <br /><small class="text-muted">@v.FechaIngreso.ToString("dd/MM/yyyy HH:mm")</small>
+                                </td>
+                                <td class="text-center">@v.CantidadLineas</td>
+                                <td class="text-end fw-semibold">Q @v.Total.ToString("0.00")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<VentaListaDto> ventas = new();
+    private bool cargando = true;
+    private bool sesionLista;
+    private string mensajeError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await CargarAsync();
+    }
+
+    private void VerDetalle(int idVenta)
+    {
+        Nav.NavigateTo($"/ventas/{idVenta}");
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<List<VentaListaDto>>("api/ventas");
+        if (resultado.Ok)
+        {
+            ventas = resultado.Datos ?? new();
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+}

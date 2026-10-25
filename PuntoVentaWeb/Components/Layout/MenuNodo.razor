@@ -1,0 +1,57 @@
+@if (Nodo.Hijos.Count > 0)
+{
+    <div>
+        @if (!string.IsNullOrWhiteSpace(Nodo.Url))
+        {
+            @* Tiene hijos Y una página propia: el texto navega, la flecha solo despliega. *@
+            <div class="nav-link d-flex align-items-center p-0" style="@Sangria">
+                <NavLink class="flex-grow-1 d-flex align-items-center py-2 px-2" href="@Ruta" Match="NavLinkMatch.All">
+                    <i class="bi @Nodo.Icono me-2"></i>@Nodo.Nombre
+                </NavLink>
+                <button type="button" class="btn btn-sm btn-link text-white-50 px-2" @onclick="Alternar">
+                    <i class="bi @(abierto ? "bi-chevron-down" : "bi-chevron-right")"></i>
+                </button>
+            </div>
+        }
+        else
+        {
+            <button type="button" class="nav-link" style="@Sangria" @onclick="Alternar">
+                <i class="bi @Nodo.Icono me-2"></i>@Nodo.Nombre
+                <i class="bi @(abierto ? "bi-chevron-down" : "bi-chevron-right") ms-auto small"></i>
+            </button>
+        }
+
+        @if (abierto)
+        {
+            @foreach (var hijo in Nodo.Hijos)
+            {
+                <MenuNodo Nodo="hijo" Nivel="Nivel + 1" />
+            }
+        }
+    </div>
+}
+else
+{
+    <NavLink class="nav-link" href="@Ruta" style="@Sangria">
+        <i class="bi @Nodo.Icono me-2"></i>@Nodo.Nombre
+    </NavLink>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public MenuDto Nodo { get; set; } = default!;
+
+    [Parameter]
+    public int Nivel { get; set; }
+
+    private bool abierto = true;
+
+    private string Sangria => $"padding-left: {12 + Nivel * 16}px;";
+
+    private string Ruta => (Nodo.Url ?? string.Empty).TrimStart('/');
+
+    private void Alternar()
+    {
+        abierto = !abierto;
+    }
+}

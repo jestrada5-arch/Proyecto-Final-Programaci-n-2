@@ -1,0 +1,164 @@
+@page "/reportes/productos"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Reporte de productos</PageTitle>
+
+@if (!sesionLista)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3 pv-no-imprimir">
+        <div>
+            <a href="/reportes" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Reportes</a>
+            <h3 class="mb-0"><i class="bi bi-box-seam text-primary"></i> Reporte de productos</h3>
+        </div>
+        <button class="btn btn-outline-secondary" @onclick="Imprimir">
+            <i class="bi bi-printer"></i> Imprimir
+        </button>
+    </div>
+
+    <div class="card shadow-sm mb-3 pv-no-imprimir">
+        <div class="card-body">
+            <label class="form-label fw-semibold">Buscar por nombre o marca</label>
+            <input class="form-control" placeholder="Ej. Coca-Cola, Alpina…" @bind-value="filtro" @bind-value:event="oninput" />
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible pv-no-imprimir">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+
+    <div class="pv-encabezado-impresion mb-3 d-none d-print-block">
+        <h4 class="mb-0">Reporte de productos</h4>
+        <small class="text-muted">Generado el @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</small>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Producto</th>
+                        <th>Marca</th>
+                        <th class="text-center">Existencia</th>
+                        <th class="text-end">Precio Costo</th>
+                        <th class="text-end">Precio Venta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (cargando)
+                    {
+                        <tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>
+                    }
+                    else if (Filtrados.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-center text-muted py-4">No hay productos que coincidan.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var p in Filtrados)
+                        {
+                            <tr>
+                                <td>@p.Producto</td>
+                                <td>@p.Marca</td>
+                                <td class="text-center">
+                                    @p.Existencia
+                                    @if (p.Existencia <= 0)
+                                    {
+                                        <span class="badge text-bg-danger ms-1">Agotado</span>
+                                    }
+                                </td>
+                                <td class="text-end">Q @p.PrecioCosto.ToString("0.00")</td>
+                                <td class="text-end">Q @p.PrecioVenta.ToString("0.00")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+                @if (!cargando && Filtrados.Count > 0)
+                {
+                    <tfoot class="table-light">
+                        <tr>
+                            <td colspan="2" class="fw-semibold">@Filtrados.Count producto(s)</td>
+                            <td class="text-center fw-semibold">@Filtrados.Sum(p => p.Existencia) unid.</td>
+                            <td class="text-end fw-semibold" colspan="2">Valor en inventario (costo): Q @Filtrados.Sum(p => p.Existencia * p.PrecioCosto).ToString("0.00")</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    </div>
+}
+
+<style>
+    @@media print {
+        .pv-no-imprimir { display: none !important; }
+    }
+</style>
+
+@code {
+    private List<ProductoDto> productos = new();
+    private bool cargando = true;
+    private bool sesionLista;
+    private string filtro = string.Empty;
+    private string mensajeError = string.Empty;
+
+    private List<ProductoDto> Filtrados => string.IsNullOrWhiteSpace(filtro)
+        ? productos
+        : productos.Where(p =>
+            p.Producto.Contains(filtro, StringComparison.OrdinalIgnoreCase) ||
+            (p.Marca ?? string.Empty).Contains(filtro, StringComparison.OrdinalIgnoreCase))
+          .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await CargarAsync();
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<List<ProductoDto>>("api/productos/reporte");
+        if (resultado.Ok)
+        {
+            productos = (resultado.Datos ?? new()).OrderBy(p => p.Producto).ToList();
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+
+    private async Task Imprimir()
+    {
+        await JS.InvokeVoidAsync("print");
+    }
+}

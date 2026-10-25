@@ -1,0 +1,180 @@
+@page "/reportes/ventas"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Reporte de ventas</PageTitle>
+
+@if (!sesionLista)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3 pv-no-imprimir">
+        <div>
+            <a href="/reportes" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Reportes</a>
+            <h3 class="mb-0"><i class="bi bi-cash-coin text-primary"></i> Reporte de ventas</h3>
+        </div>
+        <button class="btn btn-outline-secondary" @onclick="Imprimir">
+            <i class="bi bi-printer"></i> Imprimir
+        </button>
+    </div>
+
+    <div class="card shadow-sm mb-3 pv-no-imprimir">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-4 col-md-3">
+                    <label class="form-label small fw-semibold">Desde</label>
+                    <input type="date" class="form-control" @bind="desde" />
+                </div>
+                <div class="col-sm-4 col-md-3">
+                    <label class="form-label small fw-semibold">Hasta</label>
+                    <input type="date" class="form-control" @bind="hasta" />
+                </div>
+                <div class="col-sm-4 col-md-3">
+                    <button class="btn btn-outline-secondary w-100" @onclick="LimpiarFiltro">Quitar filtro</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible pv-no-imprimir">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+
+    <div class="pv-encabezado-impresion mb-3 d-none d-print-block">
+        <h4 class="mb-0">Reporte de ventas</h4>
+        <small class="text-muted">Generado el @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</small>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Factura</th>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Empleado</th>
+                        <th class="text-center">Productos</th>
+                        <th class="text-end">Total Venta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (cargando)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">Cargando…</td></tr>
+                    }
+                    else if (Filtradas.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">No hay ventas en ese rango de fechas.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var v in Filtradas)
+                        {
+                            <tr role="button" @onclick="() => VerDetalle(v.IdVenta)" style="cursor: pointer;">
+                                <td class="fw-semibold">@v.Serie-@v.NoFactura</td>
+                                <td>@v.FechaFactura.ToString("dd/MM/yyyy")</td>
+                                <td>@v.Cliente</td>
+                                <td>@v.Empleado</td>
+                                <td class="text-center">@v.CantidadLineas</td>
+                                <td class="text-end fw-semibold">Q @v.Total.ToString("0.00")</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+                @if (!cargando && Filtradas.Count > 0)
+                {
+                    <tfoot class="table-light">
+                        <tr>
+                            <td colspan="5" class="text-end fw-semibold">Total general (@Filtradas.Count factura(s))</td>
+                            <td class="text-end fw-bold fs-5">Q @Filtradas.Sum(v => v.Total).ToString("0.00")</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    </div>
+}
+
+<style>
+    @@media print {
+        .pv-no-imprimir { display: none !important; }
+    }
+</style>
+
+@code {
+    private List<VentaListaDto> ventas = new();
+    private bool cargando = true;
+    private bool sesionLista;
+    private string mensajeError = string.Empty;
+    private DateTime? desde;
+    private DateTime? hasta;
+
+    private List<VentaListaDto> Filtradas => ventas.Where(v =>
+        (!desde.HasValue || v.FechaFactura.Date >= desde.Value.Date) &&
+        (!hasta.HasValue || v.FechaFactura.Date <= hasta.Value.Date)
+    ).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        await CargarAsync();
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        StateHasChanged();
+
+        var resultado = await Api.ObtenerAsync<List<VentaListaDto>>("api/ventas");
+        if (resultado.Ok)
+        {
+            ventas = (resultado.Datos ?? new()).OrderByDescending(v => v.FechaFactura).ToList();
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+        }
+
+        cargando = false;
+    }
+
+    private void LimpiarFiltro()
+    {
+        desde = null;
+        hasta = null;
+    }
+
+    private void VerDetalle(int idVenta)
+    {
+        Nav.NavigateTo($"/ventas/{idVenta}");
+    }
+
+    private async Task Imprimir()
+    {
+        await JS.InvokeVoidAsync("print");
+    }
+}

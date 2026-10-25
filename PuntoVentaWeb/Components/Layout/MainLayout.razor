@@ -1,0 +1,164 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject SesionService Sesion
+@inject NavigationManager Nav
+
+@if (!Sesion.Restaurada)
+{
+    <div class="d-flex justify-content-center align-items-center" style="min-height: 100vh;">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+}
+else if (!Sesion.Iniciada)
+{
+    @if (EsLogin)
+    {
+        <div>@Body</div>
+    }
+}
+else
+{
+    <div class="pv-page">
+        <aside class="pv-sidebar">
+            <div class="pv-brand">
+                <span class="pv-brand-icon"><i class="bi bi-shop"></i></span>
+                <span class="pv-brand-copy">
+                    <strong>Punto de Venta</strong>
+                    <small>GESTIÓN COMERCIAL</small>
+                </span>
+            </div>
+            <NavMenu />
+        </aside>
+
+        <div class="pv-main">
+            <div class="pv-top">
+                <span class="pv-top-caption">Panel de gestión</span>
+                <span class="pv-user">
+                    <span class="pv-user-icon"><i class="bi bi-person"></i></span>
+                    <span>@Sesion.Usuario</span>
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-secondary pv-logout" @onclick="CerrarSesion">
+                    <i class="bi bi-box-arrow-right me-1"></i><span>Cerrar sesión</span>
+                </button>
+            </div>
+
+            <article class="pv-content">
+                @Body
+            </article>
+        </div>
+    </div>
+}
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ocurrió un error inesperado.
+    <a href="." class="reload">Recargar</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool EsLogin =>
+        Nav.ToBaseRelativePath(Nav.Uri).StartsWith("login", StringComparison.OrdinalIgnoreCase);
+
+    protected override void OnInitialized()
+    {
+        Sesion.Cambio += AlCambiarSesion;
+        Nav.LocationChanged += AlCambiarUbicacion;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !Sesion.Restaurada)
+        {
+            await Sesion.RestaurarAsync();
+        }
+    }
+
+    // Sin sesión solo se puede ver /login; con sesión, /login lleva al inicio.
+    private void Verificar()
+    {
+        if (!Sesion.Restaurada)
+        {
+            return;
+        }
+
+        if (!Sesion.Iniciada && !EsLogin)
+        {
+            Nav.NavigateTo("login");
+        }
+        else if (Sesion.Iniciada && EsLogin)
+        {
+            Nav.NavigateTo("");
+        }
+        else if (Sesion.Iniciada && !PuedeAccederRutaActual())
+        {
+            Nav.NavigateTo("", replace: true);
+        }
+    }
+
+    private bool PuedeAccederRutaActual()
+    {
+        if (Sesion.PuedeAdministrar)
+        {
+            return true;
+        }
+
+        var ruta = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
+        if (Sesion.EsBodeguero)
+        {
+            return ruta == "/" ||
+                EsRuta(ruta, "/productos") ||
+                EsRuta(ruta, "/compras") ||
+                EsRuta(ruta, "/proveedores") ||
+                ruta.Equals("/reportes", StringComparison.OrdinalIgnoreCase) ||
+                EsRuta(ruta, "/reportes/existencias") ||
+                EsRuta(ruta, "/reportes/compras") ||
+                ruta.Equals("/not-found", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (Sesion.EsCajero)
+        {
+            return ruta == "/" ||
+                EsRuta(ruta, "/productos") ||
+                EsRuta(ruta, "/ventas") ||
+                EsRuta(ruta, "/clientes") ||
+                ruta.Equals("/reportes", StringComparison.OrdinalIgnoreCase) ||
+                EsRuta(ruta, "/reportes/ventas") ||
+                ruta.Equals("/not-found", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool EsRuta(string ruta, string prefijo) =>
+        ruta.Equals(prefijo, StringComparison.OrdinalIgnoreCase) ||
+        ruta.StartsWith(prefijo + "/", StringComparison.OrdinalIgnoreCase);
+
+    private void AlCambiarSesion()
+    {
+        _ = InvokeAsync(() =>
+        {
+            Verificar();
+            StateHasChanged();
+        });
+    }
+
+    private void AlCambiarUbicacion(object? sender, LocationChangedEventArgs e)
+    {
+        _ = InvokeAsync(() =>
+        {
+            Verificar();
+            StateHasChanged();
+        });
+    }
+
+    private async Task CerrarSesion()
+    {
+        await Sesion.CerrarAsync();
+    }
+
+    public void Dispose()
+    {
+        Sesion.Cambio -= AlCambiarSesion;
+        Nav.LocationChanged -= AlCambiarUbicacion;
+    }
+}

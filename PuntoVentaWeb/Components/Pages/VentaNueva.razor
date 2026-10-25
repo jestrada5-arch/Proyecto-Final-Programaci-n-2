@@ -1,0 +1,573 @@
+@page "/ventas/nueva"
+@using PuntoVentaWeb.Models
+@using PuntoVentaWeb.Services
+@inject ApiClient Api
+@inject SesionService Sesion
+@inject NavigationManager Nav
+
+<PageTitle>Nueva venta</PageTitle>
+
+@if (!sesionLista)
+{
+    <p class="text-muted">Cargando…</p>
+}
+else if (!Sesion.Iniciada)
+{
+    <p class="text-muted">Redirigiendo al inicio de sesión…</p>
+}
+else
+{
+    <div class="mb-3">
+        <a href="/ventas" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Ventas</a>
+        <h3 class="mb-0"><i class="bi bi-cash-coin text-primary"></i> Nueva venta</h3>
+    </div>
+
+    @if (!string.IsNullOrEmpty(mensajeError))
+    {
+        <div class="alert alert-danger alert-dismissible">
+            @mensajeError
+            <button type="button" class="btn-close" @onclick="() => mensajeError = string.Empty"></button>
+        </div>
+    }
+
+    @if (clienteConfirmado is null)
+    {
+        <!-- ===================== Paso 1: identificar cliente por NIT ===================== -->
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="mb-1"><i class="bi bi-person-badge text-primary"></i> Identificar cliente</h5>
+                <p class="text-muted small mb-3">Como en caja: primero el NIT del cliente. Si ya está registrado, se completan sus datos solo.</p>
+
+                <div class="input-group input-group-lg" style="max-width: 480px;">
+                    <span class="input-group-text bg-white"><i class="bi bi-upc"></i></span>
+                    <input class="form-control" placeholder="NIT del cliente (o CF)" autofocus
+                           @bind-value="nitBuscado" @bind-value:event="oninput" @onkeyup="OnTeclaNit" disabled="@buscandoCliente" />
+                    <button class="btn btn-primary" type="button" @onclick="BuscarClientePorNit" disabled="@buscandoCliente">
+                        @(buscandoCliente ? "Buscando…" : "Buscar")
+                    </button>
+                </div>
+
+                @if (!string.IsNullOrEmpty(clienteMensaje) && !mostrarFormularioNuevo)
+                {
+                    <div class="text-danger small mt-2">@clienteMensaje</div>
+                }
+
+                @if (mostrarFormularioNuevo)
+                {
+                    <div class="border rounded p-3 mt-3 bg-light">
+                        <p class="mb-3">
+                            <i class="bi bi-info-circle text-primary"></i>
+                            No encontré ningún cliente con el NIT <strong>@nitBuscado</strong>. Registrelo y se continúa con la venta automáticamente.
+                        </p>
+
+                        @if (!string.IsNullOrEmpty(clienteMensaje))
+                        {
+                            <div class="text-danger small mb-2">@clienteMensaje</div>
+                        }
+
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Nombres</label>
+                                <input class="form-control" @bind="nuevoCliente.Nombres" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Apellidos</label>
+                                <input class="form-control" @bind="nuevoCliente.Apellidos" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-semibold">NIT</label>
+                                <input class="form-control" @bind="nuevoCliente.Nit" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-semibold">Género</label>
+                                <select class="form-select" @bind="nuevoCliente.Genero">
+                                    <option value="@true">Masculino</option>
+                                    <option value="@false">Femenino</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-semibold">Teléfono</label>
+                                <input class="form-control" @bind="nuevoCliente.Telefono" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold">Correo electrónico (opcional)</label>
+                                <input class="form-control" @bind="nuevoCliente.CorreoElectronico" />
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-primary" @onclick="GuardarClienteNuevo" disabled="@guardandoCliente">
+                                @(guardandoCliente ? "Guardando…" : "Guardar y continuar con la venta")
+                            </button>
+                            <button class="btn btn-outline-secondary" @onclick="CancelarClienteNuevo" disabled="@guardandoCliente">Cancelar</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- ===================== Paso 2: armar la venta ===================== -->
+        <div class="row g-3">
+            <div class="col-lg-7">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold">Buscar producto (nombre o código)</label>
+                        <div class="position-relative">
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text bg-white"><i class="bi bi-upc-scan"></i></span>
+                                <input class="form-control" placeholder="Ej. Coca-Cola 600ml, o escriba el código…" autofocus
+                                       @bind-value="textoBusqueda" @bind-value:event="oninput" @onkeyup="BuscarConRetraso" />
+                            </div>
+
+                            @if (resultados.Count > 0)
+                            {
+                                <div class="list-group position-absolute w-100 shadow-sm pv-resultados">
+                                    @foreach (var p in resultados)
+                                    {
+                                        <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                                                disabled="@(p.Existencia <= 0)" @onclick="() => AgregarLinea(p)">
+                                            <span>
+                                                <strong>@p.Producto</strong>
+                                                <small class="text-muted"> · @p.Marca · código @p.IdProducto</small>
+                                            </span>
+                                            <span>
+                                                @if (p.Existencia <= 0)
+                                                {
+                                                    <span class="badge text-bg-danger">Agotado</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge text-bg-light border me-2">Stock: @p.Existencia</span>
+                                                }
+                                                <span class="fw-semibold">Q @p.PrecioVenta.ToString("0.00")</span>
+                                            </span>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-3"><i class="bi bi-cart3"></i> Productos agregados</h6>
+                        @if (carrito.Count == 0)
+                        {
+                            <p class="text-muted text-center py-4 mb-0">
+                                Busque un producto arriba para agregarlo a la venta.
+                            </p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Producto</th>
+                                            <th style="width: 120px;">Cantidad</th>
+                                            <th class="text-end" style="width: 110px;">Precio</th>
+                                            <th style="width: 50px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var linea in carrito)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    @linea.Producto
+                                                    @if (!string.IsNullOrEmpty(linea.Marca))
+                                                    {
+                                                        <br /><small class="text-muted">@linea.Marca</small>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <input type="number" min="1" max="@linea.Existencia" class="form-control form-control-sm"
+                                                           value="@linea.Cantidad" @onchange="@(e => CambiarCantidad(linea, e.Value))" />
+                                                </td>
+                                                <td class="text-end">Q @linea.PrecioUnitario.ToString("0.00")</td>
+                                                <td>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => QuitarLinea(linea)">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-5">
+                <!-- ============ Previsualización de la factura, tipo boleta ============ -->
+                <div class="card shadow-sm pv-resumen pv-boleta">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start pb-3 mb-3 border-bottom pv-encabezado">
+                            <div>
+                                <h6 class="text-uppercase text-muted mb-1 small">Comprobante de venta</h6>
+                                <div class="fw-semibold fs-5">@clienteConfirmado.Nombres @clienteConfirmado.Apellidos</div>
+                                <div class="small text-muted">NIT: @clienteConfirmado.Nit</div>
+                            </div>
+                            <button class="btn btn-sm btn-link text-decoration-none" @onclick="CambiarCliente">
+                                <i class="bi bi-arrow-repeat"></i> Cambiar
+                            </button>
+                        </div>
+
+                        <div class="row g-2 mb-3 pv-encabezado">
+                            <div class="col-7">
+                                <label class="form-label text-uppercase text-muted small mb-1">Atendido por</label>
+                                <select class="form-select form-select-sm" @bind="idEmpleadoSeleccionado">
+                                    <option value="0">Seleccione…</option>
+                                    @foreach (var e in empleados)
+                                    {
+                                        <option value="@e.IdEmpleado">@e.Nombre</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label text-uppercase text-muted small mb-1">Fecha</label>
+                                <input type="date" class="form-control form-control-sm" max="@FechaMaxima" @bind="fechaFactura" />
+                            </div>
+                        </div>
+
+                        <h6 class="text-uppercase text-muted small mb-2">Detalle</h6>
+                        @if (carrito.Count == 0)
+                        {
+                            <p class="text-muted small mb-3">La factura se arma aquí según vaya agregando productos.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive mb-2" style="max-height: 260px; overflow-y: auto;">
+                                <table class="table table-sm align-middle mb-0">
+                                    <tbody>
+                                        @foreach (var linea in carrito)
+                                        {
+                                            <tr>
+                                                <td class="small">
+                                                    @linea.Producto
+                                                    <span class="text-muted">x@linea.Cantidad</span>
+                                                </td>
+                                                <td class="text-end small fw-semibold" style="width: 90px;">Q @linea.Subtotal.ToString("0.00")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+
+                        <hr class="pv-pie" />
+
+                        <div class="d-flex justify-content-between align-items-center mb-3 pv-pie">
+                            <span class="fs-5">Total</span>
+                            <span class="fs-3 fw-bold text-success">Q @Total.ToString("0.00")</span>
+                        </div>
+
+                        <button class="btn btn-primary btn-lg w-100 pv-pie" @onclick="Cobrar" disabled="@(guardando || carrito.Count == 0)">
+                            @(guardando ? "Procesando…" : "Registrar venta")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+<style>
+    .pv-resultados {
+        z-index: 1056;
+        max-height: 280px;
+        overflow-y: auto;
+    }
+
+    .pv-resumen {
+        position: sticky;
+        top: 1rem;
+    }
+
+    .pv-boleta .pv-encabezado,
+    .pv-boleta .pv-pie {
+        /* el encabezado (cliente/empleado/fecha) y el pie (total/botón) no se mueven:
+           solo el cuerpo con los productos crece conforme se agregan */
+        flex-shrink: 0;
+    }
+</style>
+
+@code {
+    private List<EmpleadoOpcionDto> empleados = new();
+    private List<ProductoDto> resultados = new();
+    private List<VentaDetalleEntradaDto> carrito = new();
+
+    private bool sesionLista;
+    private bool guardando;
+
+    // --- identificación del cliente por NIT ---
+    private string nitBuscado = string.Empty;
+    private bool buscandoCliente;
+    private bool mostrarFormularioNuevo;
+    private bool guardandoCliente;
+    private string clienteMensaje = string.Empty;
+    private ClienteDto? clienteConfirmado;
+    private ClienteDto nuevoCliente = new();
+
+    private int idEmpleadoSeleccionado;
+    private DateTime fechaFactura = DateTime.Today;
+    private string textoBusqueda = string.Empty;
+    private string mensajeError = string.Empty;
+
+    private CancellationTokenSource? retraso;
+
+    private decimal Total => carrito.Sum(l => l.Subtotal);
+
+    private string FechaMaxima => DateTime.Today.ToString("yyyy-MM-dd");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Sesion.RestaurarAsync();
+        sesionLista = true;
+
+        if (!Sesion.Iniciada)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        var resultadoEmpleados = await Api.ObtenerAsync<List<EmpleadoOpcionDto>>("api/empleados/opciones");
+        if (resultadoEmpleados.Ok) empleados = resultadoEmpleados.Datos ?? new();
+    }
+
+    // ---------------- Cliente por NIT ----------------
+
+    private async Task OnTeclaNit(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await BuscarClientePorNit();
+        }
+    }
+
+    private async Task BuscarClientePorNit()
+    {
+        clienteMensaje = string.Empty;
+        mostrarFormularioNuevo = false;
+
+        var nit = nitBuscado.Trim();
+        if (string.IsNullOrWhiteSpace(nit))
+        {
+            clienteMensaje = "Ingrese el NIT del cliente.";
+            return;
+        }
+
+        buscandoCliente = true;
+        var resultado = await Api.ObtenerAsync<List<ClienteDto>>($"api/clientes?buscar={Uri.EscapeDataString(nit)}");
+        buscandoCliente = false;
+
+        if (!resultado.Ok)
+        {
+            clienteMensaje = resultado.Mensaje;
+            if (!Sesion.Iniciada) Nav.NavigateTo("/login");
+            return;
+        }
+
+        var encontrado = (resultado.Datos ?? new())
+            .FirstOrDefault(c => string.Equals(c.Nit, nit, StringComparison.OrdinalIgnoreCase));
+
+        if (encontrado is not null)
+        {
+            clienteConfirmado = encontrado;
+        }
+        else
+        {
+            mostrarFormularioNuevo = true;
+            nuevoCliente = new ClienteDto { Nit = nit, Genero = true };
+        }
+    }
+
+    private void CancelarClienteNuevo()
+    {
+        mostrarFormularioNuevo = false;
+        clienteMensaje = string.Empty;
+    }
+
+    private async Task GuardarClienteNuevo()
+    {
+        clienteMensaje = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(nuevoCliente.Nombres) || string.IsNullOrWhiteSpace(nuevoCliente.Apellidos) || string.IsNullOrWhiteSpace(nuevoCliente.Nit))
+        {
+            clienteMensaje = "Nombres, apellidos y NIT son obligatorios.";
+            return;
+        }
+
+        guardandoCliente = true;
+        var resultado = await Api.EnviarAsync(HttpMethod.Post, "api/clientes", nuevoCliente);
+
+        if (!resultado.Ok)
+        {
+            guardandoCliente = false;
+            clienteMensaje = resultado.Mensaje;
+            return;
+        }
+
+        // la API no regresa el objeto creado en ResultadoApi (sin datos), así que lo
+        // volvemos a buscar por su NIT para obtener el id_cliente recién asignado.
+        var busqueda = await Api.ObtenerAsync<List<ClienteDto>>($"api/clientes?buscar={Uri.EscapeDataString(nuevoCliente.Nit.Trim())}");
+        guardandoCliente = false;
+
+        var creado = busqueda.Ok
+            ? (busqueda.Datos ?? new()).FirstOrDefault(c => string.Equals(c.Nit, nuevoCliente.Nit.Trim(), StringComparison.OrdinalIgnoreCase))
+            : null;
+
+        clienteConfirmado = creado ?? nuevoCliente;
+        mostrarFormularioNuevo = false;
+    }
+
+    private void CambiarCliente()
+    {
+        clienteConfirmado = null;
+        nitBuscado = string.Empty;
+        mostrarFormularioNuevo = false;
+        clienteMensaje = string.Empty;
+    }
+
+    // ---------------- Productos / carrito ----------------
+
+    private async Task BuscarConRetraso()
+    {
+        retraso?.Cancel();
+        retraso = new CancellationTokenSource();
+        var token = retraso.Token;
+
+        try
+        {
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
+
+            if (string.IsNullOrWhiteSpace(textoBusqueda))
+            {
+                resultados.Clear();
+                return;
+            }
+
+            var resultado = await Api.ObtenerAsync<List<ProductoDto>>($"api/productos?buscar={Uri.EscapeDataString(textoBusqueda)}");
+            if (!token.IsCancellationRequested && resultado.Ok)
+            {
+                resultados = (resultado.Datos ?? new()).Take(8).ToList();
+            }
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void AgregarLinea(ProductoDto producto)
+    {
+        if (producto.Existencia <= 0)
+        {
+            mensajeError = $"'{producto.Producto}' está agotado.";
+            return;
+        }
+
+        var existente = carrito.FirstOrDefault(l => l.IdProducto == producto.IdProducto);
+        if (existente is not null)
+        {
+            if (existente.Cantidad >= producto.Existencia)
+            {
+                mensajeError = $"Ya agregó toda la existencia disponible de '{producto.Producto}' ({producto.Existencia}).";
+            }
+            else
+            {
+                existente.Cantidad++;
+            }
+        }
+        else
+        {
+            carrito.Add(new VentaDetalleEntradaDto
+            {
+                IdProducto = producto.IdProducto,
+                Producto = producto.Producto,
+                Marca = producto.Marca,
+                Existencia = producto.Existencia,
+                Cantidad = 1,
+                PrecioUnitario = producto.PrecioVenta
+            });
+        }
+
+        textoBusqueda = string.Empty;
+        resultados.Clear();
+    }
+
+    private void QuitarLinea(VentaDetalleEntradaDto linea)
+    {
+        carrito.Remove(linea);
+    }
+
+    private void CambiarCantidad(VentaDetalleEntradaDto linea, object? valor)
+    {
+        if (int.TryParse(valor?.ToString(), out var cantidad))
+        {
+            if (cantidad < 1) cantidad = 1;
+            if (cantidad > linea.Existencia) cantidad = linea.Existencia;
+            linea.Cantidad = cantidad;
+        }
+    }
+
+    private async Task Cobrar()
+    {
+        mensajeError = string.Empty;
+
+        if (clienteConfirmado is null)
+        {
+            mensajeError = "Identifique al cliente por NIT antes de registrar la venta.";
+            return;
+        }
+
+        if (idEmpleadoSeleccionado <= 0)
+        {
+            mensajeError = "Seleccione quién atiende la venta.";
+            return;
+        }
+
+        if (carrito.Count == 0)
+        {
+            mensajeError = "Agregue al menos un producto.";
+            return;
+        }
+
+        if (carrito.Any(l => l.Cantidad <= 0 || l.Cantidad > l.Existencia))
+        {
+            mensajeError = "Hay una cantidad inválida en el carrito (revise que no supere la existencia disponible).";
+            return;
+        }
+
+        if (fechaFactura.Date > DateTime.Today)
+        {
+            mensajeError = "La fecha de la factura no puede ser una fecha futura.";
+            return;
+        }
+
+        guardando = true;
+
+        var dto = new VentaCrearDto
+        {
+            IdCliente = clienteConfirmado.IdCliente,
+            IdEmpleado = idEmpleadoSeleccionado,
+            FechaFactura = fechaFactura,
+            Detalles = carrito
+        };
+
+        var resultado = await Api.EnviarAsync(HttpMethod.Post, "api/ventas", dto);
+        guardando = false;
+
+        if (resultado.Ok)
+        {
+            Nav.NavigateTo("/ventas");
+        }
+        else
+        {
+            mensajeError = resultado.Mensaje;
+        }
+    }
+}
